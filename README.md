@@ -1,56 +1,100 @@
-# Memory Injection & Modification for Games
+# Memory Injection & Modification for Games  
 
-## Overview
-Memory injection and modification involve altering a game's runtime memory to modify values, unlock hidden features, or change in-game behavior. This technique is commonly used in game modding, debugging, and cheating.
+## Overview  
+This project demonstrates how to inject and modify a game's memory at runtime on Android. It uses C++ to locate the game's process, find the base address of a specific library (`libil2cpp.so`), and modify memory values using `pwrite64`.  
 
-## How It Works
-1. **Process Identification**  
-   - The target game's process is located using tools like Cheat Engine, Process Hacker, or a custom-built memory scanner.
+## Features  
+- **Process Scanning** – Finds the target game’s process ID (`PID`).  
+- **Memory Editing** – Modifies specific memory addresses in the game's runtime.  
+- **Library Base Address Detection** – Retrieves the base address of `libil2cpp.so`.  
+- **Float & DWORD Modification** – Writes new values to memory dynamically.  
 
-2. **Memory Scanning**  
-   - The memory regions of the process are scanned to locate specific values (e.g., health, ammo, score).
-   - Values are typically stored in static or dynamic memory addresses.
+## How It Works  
+1. **Find the Game Process**  
+   - The script scans `/proc` for the target game package (`com.dts.freefireth`).  
+2. **Open the Game’s Memory**  
+   - It opens `/proc/<PID>/mem` with read-write access.  
+3. **Locate the Library Base Address**  
+   - Searches for `libil2cpp.so` and retrieves its base address.  
+4. **Modify Memory Values**  
+   - Writes a float value (`2.0f`) to a specific offset (`0x4104C1C`).  
 
-3. **Memory Modification**  
-   - Once the correct address is found, it can be modified to a desired value.
-   - Example: Changing a health value from `100` to `9999`.
-
-4. **Code Injection (Optional)**  
-   - A custom DLL or external script is injected into the game process to modify behavior dynamically.
-   - This can be used to hook functions, bypass anti-cheat mechanisms, or execute custom scripts.
-
-5. **Pointer & Offset Handling**  
-   - Dynamic memory addresses require finding pointers and offsets to maintain modifications after game restarts.
-
-## Tools & Languages Used
-- **Cheat Engine** – Memory scanning and modification
-- **C++** / **C#** – DLL injection and memory manipulation
-- **Python** – Automating memory scanning with libraries like `pymem`
-- **Assembly (ASM)** – Understanding game instructions for advanced modifications
-
-## Risks & Considerations
-- **Anti-Cheat Detection** – Many online games have anti-cheat mechanisms that detect memory modification.
-- **Legal & Ethical Issues** – Modifying memory in online games can lead to bans or legal consequences.
-- **Game Crashes** – Incorrect memory edits can cause the game to crash or behave unexpectedly.
-
-## Example Code (C++)
+## Code Example  
 ```cpp
-#include <windows.h>
-#include <iostream>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <stdlib.h>
+
+int handle;
+long int get_module_base(int pid, const char *module_name) {
+    FILE *fp;
+    long addr = 0;
+    char filename[32], line[1024], *pch;
+    snprintf(filename, sizeof(filename), "/proc/%d/maps", pid);
+    fp = fopen(filename, "r");
+    if (fp) {
+        while (fgets(line, sizeof(line), fp)) {
+            if (strstr(line, module_name)) {
+                pch = strtok(line, "-");
+                addr = strtoul(pch, NULL, 16);
+                break;
+            }
+        }
+        fclose(fp);
+    }
+    return addr;
+}
+
+int WriteBaseAddress_FLOAT(long int addr, float value) {
+    pwrite64(handle, &value, 4, addr);
+    return 0;
+}
+
+int getPID(const char *packageName) {
+    DIR *dir = opendir("/proc");
+    struct dirent *ptr;
+    char filepath[256], filetext[128];
+    FILE *fp;
+    if (dir) {
+        while ((ptr = readdir(dir))) {
+            if (ptr->d_type != DT_DIR) continue;
+            sprintf(filepath, "/proc/%s/cmdline", ptr->d_name);
+            fp = fopen(filepath, "r");
+            if (fp) {
+                fgets(filetext, sizeof(filetext), fp);
+                if (strcmp(filetext, packageName) == 0) {
+                    fclose(fp);
+                    closedir(dir);
+                    return atoi(ptr->d_name);
+                }
+                fclose(fp);
+            }
+        }
+        closedir(dir);
+    }
+    return 0;
+}
 
 int main() {
-    DWORD processID = 1234; // Replace with actual game process ID
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processID);
-
-    if (hProcess) {
-        int newValue = 9999;
-        LPVOID address = (LPVOID)0x12345678; // Replace with actual memory address
-        WriteProcessMemory(hProcess, address, &newValue, sizeof(newValue), NULL);
-        CloseHandle(hProcess);
-        std::cout << "Memory modified successfully!" << std::endl;
-    } else {
-        std::cout << "Failed to open process!" << std::endl;
+    int pid = getPID("com.dts.freefireth");  // Target Game Package
+    if (pid == 0) {
+        puts("Game not found!");
+        return 1;
     }
 
+    char memPath[64];
+    sprintf(memPath, "/proc/%d/mem", pid);
+    handle = open(memPath, O_RDWR);
+    if (handle == -1) {
+        puts("Failed to open memory!");
+        return 1;
+    }
+
+    long int libBase = get_module_base(pid, "libil2cpp.so");
+    WriteBaseAddress_FLOAT(libBase + 0x4104C1C, 2.0f);  // Modify Value
+
+    close(handle);
     return 0;
 }
